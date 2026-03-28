@@ -35,7 +35,11 @@ function runCommand(cmd, cwd, deploymentId, stage) {
       stage,
     });
 
-    const child = exec(cmd, { cwd, maxBuffer: 1024 * 1024 * 10 });
+    const child = exec(cmd, { 
+      cwd, 
+      maxBuffer: 1024 * 1024 * 50, 
+      shell: true 
+    });
 
     let output = "";
 
@@ -221,35 +225,63 @@ async function deployProject({ deployment, project }) {
         eventBus.dispatch("deploy:log", {
           deploymentId,
           level: "info",
-          message:
-            oldFingerprint ? "🔄 Dependencies updated. Re-installing..." : "📦 Fresh install starting...",
+          message: oldFingerprint
+            ? "🔄 Dependencies updated. Re-installing..."
+            : "📦 Fresh install starting...",
           stage: "install",
         });
 
-        // 🛠️ PREPARE LINK
+        // 🛡️ RECOVERY-ENABLED INSTALL
         try {
-          if (fs.existsSync(targetModules)) {
-            fs.rmSync(targetModules, { recursive: true, force: true });
+          // 1. Try Junction Route (Optimal)
+          try {
+            if (fs.existsSync(targetModules)) {
+              fs.rmSync(targetModules, { recursive: true, force: true });
+            }
+            fs.symlinkSync(cacheModules, targetModules, "junction");
+          } catch (linkErr) {
+            /* proceed without link if junction fails */
           }
-          fs.symlinkSync(cacheModules, targetModules, "junction");
-        } catch (err) {
+
+          // 2. Perform Install
+          await runCommand(
+            "npm install --production --prefer-offline --no-audit --no-fund",
+            deployDir,
+            deploymentId,
+            "install"
+          );
+
+        } catch (installErr) {
+          // 3. 🚑 SELF-HEALING: If anything failed, try Normal mode
           eventBus.dispatch("deploy:log", {
             deploymentId,
             level: "warn",
-            message: `⚠️ High-speed mode limited: ${err.message}. Using standard path.`,
+            message: "🚑 Self-Healing: Optimized path failed. Retrying 100% Clean Install...",
             stage: "install",
           });
+
+          // Unlink and wipe
+          try {
+            if (fs.existsSync(targetModules)) {
+              fs.rmSync(targetModules, { recursive: true, force: true });
+            }
+            if (!fs.existsSync(cacheDir)) {
+              fs.mkdirSync(cacheDir, { recursive: true });
+            }
+          } catch (cleanErr) {
+            /* ignore cleanup errors */
+          }
+
+          // Force fresh install in real directory (without junction)
+          await runCommand(
+            "npm install --production --prefer-offline --no-audit --no-fund",
+            deployDir,
+            deploymentId,
+            "install"
+          );
         }
 
-        // Run optimized install
-        await runCommand(
-          "npm install --production --prefer-offline --no-audit --no-fund",
-          deployDir,
-          deploymentId,
-          "install"
-        );
-
-        // Update fingerprint
+        // Update fingerprint ONLY if install succeeded
         if (newFingerprint) {
           fs.writeFileSync(fingerprintFile, newFingerprint);
         }
