@@ -4,6 +4,7 @@
 const { exec, spawn } = require("child_process");
 const path = require("path");
 const fs = require("fs");
+const crypto = require("crypto");
 const { v4: uuidv4 } = require("uuid");
 const eventBus = require("../events/eventBus");
 const Deployment = require("../models/Deployment");
@@ -80,6 +81,29 @@ function runCommand(cmd, cwd, deploymentId, stage) {
 }
 
 /**
+ * Calculate a fingerprint of the project's dependencies
+ */
+function getFingerprint(dir) {
+  try {
+    const pkgPath = path.join(dir, "package.json");
+    const lockPath = path.join(dir, "package-lock.json");
+    let content = "";
+
+    if (fs.existsSync(pkgPath)) {
+      content += fs.readFileSync(pkgPath, "utf8");
+    }
+    if (fs.existsSync(lockPath)) {
+      content += fs.readFileSync(lockPath, "utf8");
+    }
+
+    if (!content) return null;
+    return crypto.createHash("sha1").update(content).digest("hex");
+  } catch (err) {
+    return null;
+  }
+}
+
+/**
  * ═══════════════════════════════════════════════════
  * MAIN DEPLOYMENT PIPELINE
  * Clone → Install → Build → Start
@@ -136,13 +160,14 @@ async function deployProject({ deployment, project }) {
     eventBus.dispatch("deploy:stage", {
       deploymentId,
       stage: "installing",
-      message: "Installing dependencies...",
+      message: "Processing dependencies...",
     });
 
     const pkgPath = path.join(deployDir, "package.json");
     if (fs.existsSync(pkgPath)) {
       const cacheDir = path.resolve(baseDir, "cache", project._id.toString());
       const cacheModules = path.join(cacheDir, "node_modules");
+      const fingerprintFile = path.join(cacheDir, "fingerprint.txt");
 
       // Ensure cache structure exists
       if (!fs.existsSync(cacheModules)) {
@@ -151,49 +176,70 @@ async function deployProject({ deployment, project }) {
 
       const targetModules = path.join(deployDir, "node_modules");
 
-      // Create Junction (Link) — Instant on Windows
-      eventBus.dispatch("deploy:log", {
-        deploymentId,
-        level: "info",
-        message: "🔗 Linking node_modules to project cache...",
-        stage: "install",
-      });
+      // Calculate new fingerprint
+      const newFingerprint = getFingerprint(deployDir);
+      let oldFingerprint = "";
 
-      try {
-        // Remove existing if any (unlikely in new uuid dir but safe)
-        if (fs.existsSync(targetModules)) {
-          fs.rmSync(targetModules, { recursive: true, force: true });
-        }
-        // Create the Link
-        fs.symlinkSync(cacheModules, targetModules, "junction");
-      } catch (err) {
-        eventBus.dispatch("deploy:log", {
-          deploymentId,
-          level: "warn",
-          message: `⚠️ Cache link failed (Fallback to Copy): ${err.message}`,
-          stage: "install",
-        });
-        // FALLBACK: If link fails, manually copy what we have
-        try {
-          fs.cpSync(cacheModules, targetModules, { recursive: true });
-        } catch (cpErr) {
-          // just log and continue
-        }
+      if (fs.existsSync(fingerprintFile)) {
+        oldFingerprint = fs.readFileSync(fingerprintFile, "utf8").trim();
       }
 
-      // Run optimized install
-      // This will update the cache DIRECTLY because of the junction link!
-      await runCommand(
-        "npm install --production --prefer-offline --no-audit --no-fund",
-        deployDir,
-        deploymentId,
-        "install"
-      );
+      // ⚡ CHECK FOR BYPASS ⚡
+      if (newFingerprint && newFingerprint === oldFingerprint) {
+        eventBus.dispatch("deploy:log", {
+          deploymentId,
+          level: "success",
+          message: "⚡ Zero-Install: Dependencies unchanged. Bypassing install stage.",
+          stage: "install",
+        });
+
+        // Link the existing cache
+        try {
+          if (fs.existsSync(targetModules)) {
+            fs.rmSync(targetModules, { recursive: true, force: true });
+          }
+          fs.symlinkSync(cacheModules, targetModules, "junction");
+        } catch (err) {
+          // fallback
+        }
+      } else {
+        // Dependencies changed or first install
+        eventBus.dispatch("deploy:log", {
+          deploymentId,
+          level: "info",
+          message:
+            oldFingerprint ? "🔄 Dependencies updated. Re-installing..." : "📦 Fresh install starting...",
+          stage: "install",
+        });
+
+        // Link (to ensure cache is updated directly)
+        try {
+          if (fs.existsSync(targetModules)) {
+            fs.rmSync(targetModules, { recursive: true, force: true });
+          }
+          fs.symlinkSync(cacheModules, targetModules, "junction");
+        } catch (err) {
+          // fallback
+        }
+
+        // Run optimized install
+        await runCommand(
+          "npm install --production --prefer-offline --no-audit --no-fund",
+          deployDir,
+          deploymentId,
+          "install"
+        );
+
+        // Update fingerprint
+        if (newFingerprint) {
+          fs.writeFileSync(fingerprintFile, newFingerprint);
+        }
+      }
 
       eventBus.dispatch("deploy:log", {
         deploymentId,
         level: "success",
-        message: "✅ Dependencies ready (Linked Cache)",
+        message: "✅ Dependencies ready",
         stage: "install",
       });
     } else {
