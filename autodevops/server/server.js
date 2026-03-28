@@ -148,6 +148,23 @@ mongoose
     console.log("  🟢 MongoDB Connected Successfully");
     console.log("═══════════════════════════════════════════════════");
 
+    // 🧹 STARTUP CLEANUP: Clear Ghost Deployments
+    const Deployment = require("./models/Deployment");
+    const cleanupGhost = async () => {
+      try {
+        const result = await Deployment.updateMany(
+          { status: { $in: ["cloning", "installing", "starting"] } },
+          { status: "failed" }
+        );
+        if (result.modifiedCount > 0) {
+          console.log(`[🚀 DeployNova] 🧹 Cleared ${result.modifiedCount} ghost deployments.`);
+        }
+      } catch (err) {
+        console.error("[🚀 DeployNova] ⚠️ Ghost cleanup failed:", err);
+      }
+    };
+    cleanupGhost();
+
     server.listen(PORT, () => {
       console.log("");
       console.log("  🚀 DeployNova is LIVE!");

@@ -348,6 +348,7 @@ async function deployProject({ deployment, project }) {
       throw new Error("Application process exited immediately after start");
     }
 
+    // ── COMPLETE ──
     const buildDuration = Date.now() - startTime;
     const url = `http://localhost:${port}`;
 
@@ -356,7 +357,24 @@ async function deployProject({ deployment, project }) {
       processId: appProcess.pid,
     });
 
-    // ── COMPLETE ──
+    // 🧹 AUTO-CLEANUP: Kill and remove old deployments for this project
+    try {
+      const otherDeploys = await Deployment.find({
+        projectId: project._id,
+        _id: { $ne: deploymentId },
+        status: { $in: ["live", "starting", "installing"] },
+      });
+
+      for (const old of otherDeploys) {
+        // Stop process if running
+        await stopDeployment(old._id.toString());
+        // Note: Disk cleanup of folders is handled during the next cycle
+        // to avoid race conditions with live traffic.
+      }
+    } catch (err) {
+      // non-critical cleanup
+    }
+
     eventBus.dispatch("deploy:complete", {
       deploymentId,
       url,
