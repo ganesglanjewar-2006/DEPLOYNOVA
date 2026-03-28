@@ -139,14 +139,62 @@ async function deployProject({ deployment, project }) {
       message: "Installing dependencies...",
     });
 
-    // Check if package.json exists
     const pkgPath = path.join(deployDir, "package.json");
     if (fs.existsSync(pkgPath)) {
-      await runCommand("npm install --production", deployDir, deploymentId, "install");
+      const cacheDir = path.resolve(baseDir, "cache", project._id.toString());
+      const cacheModules = path.join(cacheDir, "node_modules");
+
+      // Attempt to restore cache
+      if (fs.existsSync(cacheModules)) {
+        eventBus.dispatch("deploy:log", {
+          deploymentId,
+          level: "info",
+          message: "📂 Restoring node_modules from cache...",
+          stage: "install",
+        });
+        const targetModules = path.join(deployDir, "node_modules");
+        try {
+          fs.cpSync(cacheModules, targetModules, { recursive: true });
+        } catch (err) {
+          eventBus.dispatch("deploy:log", {
+            deploymentId,
+            level: "warn",
+            message: `⚠️ Cache restore failed: ${err.message}`,
+            stage: "install",
+          });
+        }
+      }
+
+      // Run optimized install
+      await runCommand(
+        "npm install --production --prefer-offline --no-audit --no-fund",
+        deployDir,
+        deploymentId,
+        "install"
+      );
+
+      // Update cache
+      if (!fs.existsSync(cacheDir)) {
+        fs.mkdirSync(cacheDir, { recursive: true });
+      }
+      const targetModules = path.join(deployDir, "node_modules");
+      if (fs.existsSync(targetModules)) {
+        try {
+          fs.cpSync(targetModules, cacheModules, { recursive: true });
+        } catch (err) {
+          eventBus.dispatch("deploy:log", {
+            deploymentId,
+            level: "warn",
+            message: `⚠️ Cache update failed: ${err.message}`,
+            stage: "install",
+          });
+        }
+      }
+
       eventBus.dispatch("deploy:log", {
         deploymentId,
         level: "success",
-        message: "✅ Dependencies installed",
+        message: "✅ Dependencies installed (Cached)",
         stage: "install",
       });
     } else {
