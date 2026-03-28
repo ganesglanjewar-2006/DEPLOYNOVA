@@ -144,28 +144,45 @@ async function deployProject({ deployment, project }) {
       const cacheDir = path.resolve(baseDir, "cache", project._id.toString());
       const cacheModules = path.join(cacheDir, "node_modules");
 
-      // Attempt to restore cache
-      if (fs.existsSync(cacheModules)) {
+      // Ensure cache structure exists
+      if (!fs.existsSync(cacheModules)) {
+        fs.mkdirSync(cacheModules, { recursive: true });
+      }
+
+      const targetModules = path.join(deployDir, "node_modules");
+
+      // Create Junction (Link) — Instant on Windows
+      eventBus.dispatch("deploy:log", {
+        deploymentId,
+        level: "info",
+        message: "🔗 Linking node_modules to project cache...",
+        stage: "install",
+      });
+
+      try {
+        // Remove existing if any (unlikely in new uuid dir but safe)
+        if (fs.existsSync(targetModules)) {
+          fs.rmSync(targetModules, { recursive: true, force: true });
+        }
+        // Create the Link
+        fs.symlinkSync(cacheModules, targetModules, "junction");
+      } catch (err) {
         eventBus.dispatch("deploy:log", {
           deploymentId,
-          level: "info",
-          message: "📂 Restoring node_modules from cache...",
+          level: "warn",
+          message: `⚠️ Cache link failed (Fallback to Copy): ${err.message}`,
           stage: "install",
         });
-        const targetModules = path.join(deployDir, "node_modules");
+        // FALLBACK: If link fails, manually copy what we have
         try {
           fs.cpSync(cacheModules, targetModules, { recursive: true });
-        } catch (err) {
-          eventBus.dispatch("deploy:log", {
-            deploymentId,
-            level: "warn",
-            message: `⚠️ Cache restore failed: ${err.message}`,
-            stage: "install",
-          });
+        } catch (cpErr) {
+          // just log and continue
         }
       }
 
       // Run optimized install
+      // This will update the cache DIRECTLY because of the junction link!
       await runCommand(
         "npm install --production --prefer-offline --no-audit --no-fund",
         deployDir,
@@ -173,28 +190,10 @@ async function deployProject({ deployment, project }) {
         "install"
       );
 
-      // Update cache
-      if (!fs.existsSync(cacheDir)) {
-        fs.mkdirSync(cacheDir, { recursive: true });
-      }
-      const targetModules = path.join(deployDir, "node_modules");
-      if (fs.existsSync(targetModules)) {
-        try {
-          fs.cpSync(targetModules, cacheModules, { recursive: true });
-        } catch (err) {
-          eventBus.dispatch("deploy:log", {
-            deploymentId,
-            level: "warn",
-            message: `⚠️ Cache update failed: ${err.message}`,
-            stage: "install",
-          });
-        }
-      }
-
       eventBus.dispatch("deploy:log", {
         deploymentId,
         level: "success",
-        message: "✅ Dependencies installed (Cached)",
+        message: "✅ Dependencies ready (Linked Cache)",
         stage: "install",
       });
     } else {
