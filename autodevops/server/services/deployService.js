@@ -72,7 +72,10 @@ function runCommand(cmd, cwd, deploymentId, stage) {
       if (code === 0) {
         resolve(output);
       } else {
-        reject(new Error(`Command failed with exit code ${code}: ${cmd}`));
+        const errorMsg = output.split("\n").slice(-5).join(" ").trim();
+        reject(
+          new Error(`Command failed (Exit ${code}): ${cmd} ${errorMsg ? ` | Error: ${errorMsg}` : ""}`)
+        );
       }
     });
 
@@ -193,14 +196,25 @@ async function deployProject({ deployment, project }) {
           stage: "install",
         });
 
-        // Link the existing cache
+        // 🔗 TRY INSTANT LINK
         try {
           if (fs.existsSync(targetModules)) {
             fs.rmSync(targetModules, { recursive: true, force: true });
           }
           fs.symlinkSync(cacheModules, targetModules, "junction");
         } catch (err) {
-          // fallback
+          eventBus.dispatch("deploy:log", {
+            deploymentId,
+            level: "warn",
+            message: `⚠️ Quick-link unavailable (${err.code}). Reverting to Standard path.`,
+            stage: "install",
+          });
+          // Fallback: Copy what we have
+          try {
+            fs.cpSync(cacheModules, targetModules, { recursive: true });
+          } catch (cpErr) {
+            /* ignore fallback failure */
+          }
         }
       } else {
         // Dependencies changed or first install
@@ -212,14 +226,19 @@ async function deployProject({ deployment, project }) {
           stage: "install",
         });
 
-        // Link (to ensure cache is updated directly)
+        // 🛠️ PREPARE LINK
         try {
           if (fs.existsSync(targetModules)) {
             fs.rmSync(targetModules, { recursive: true, force: true });
           }
           fs.symlinkSync(cacheModules, targetModules, "junction");
         } catch (err) {
-          // fallback
+          eventBus.dispatch("deploy:log", {
+            deploymentId,
+            level: "warn",
+            message: `⚠️ High-speed mode limited: ${err.message}. Using standard path.`,
+            stage: "install",
+          });
         }
 
         // Run optimized install
