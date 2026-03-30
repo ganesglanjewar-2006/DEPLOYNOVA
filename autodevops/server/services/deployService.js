@@ -5,6 +5,7 @@ const { exec, spawn } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
+const os = require("os");
 const { v4: uuidv4 } = require("uuid");
 const eventBus = require("../events/eventBus");
 const Deployment = require("../models/Deployment");
@@ -120,17 +121,38 @@ async function deployProject({ deployment, project }) {
   const deploymentId = deployment._id.toString();
   const startTime = Date.now();
 
-  const deployDir = path.resolve(
-    process.env.DEPLOY_BASE_DIR || "./deployments",
-    `${project.name}-${uuidv4().substring(0, 8)}`
-  );
+  // 💎 ARCHITECTURAL ISOLATION: Move outside project root to C:\DeployNova_Data
+  const baseDir = path.resolve(process.env.DEPLOY_BASE_DIR || "C:\\DeployNova_Data");
+  const deployDir = path.join(baseDir, "deployments", `${project.name}-${uuidv4().substring(0, 8)}`);
 
   try {
-    // Ensure base deploy directory exists
-    const baseDir = path.resolve(process.env.DEPLOY_BASE_DIR || "./deployments");
+    // Ensure isolated infrastructure exists
     if (!fs.existsSync(baseDir)) {
       fs.mkdirSync(baseDir, { recursive: true });
     }
+    const deploymentsDir = path.join(baseDir, "deployments");
+    if (!fs.existsSync(deploymentsDir)) {
+      fs.mkdirSync(deploymentsDir, { recursive: true });
+    }
+
+    // ── STAGE 0: System Health (The "Extra" Polish) ──
+    const totalMem = Math.round(os.totalmem() / 1024 / 1024 / 1024);
+    const freeMem = Math.round(os.freemem() / 1024 / 1024 / 1024);
+    const cpuCount = os.cpus().length;
+
+    eventBus.dispatch("deploy:log", {
+      deploymentId,
+      level: "info",
+      message: `🖥️  SYSTEM HEALTH: ${cpuCount} Cores | ${freeMem}GB/${totalMem}GB RAM Available`,
+      stage: "prep",
+    });
+
+    eventBus.dispatch("deploy:log", {
+      deploymentId,
+      level: "info",
+      message: `🏗️  INFRASTRUCTURE: Isolated at ${baseDir}`,
+      stage: "prep",
+    });
 
     // ── STAGE 1: Clone ──
     eventBus.dispatch("deploy:stage", {
@@ -435,11 +457,22 @@ async function deployProject({ deployment, project }) {
 
     return { url, port, buildDuration };
   } catch (err) {
+    // 📝 Log error to terminal output for transparency
+    eventBus.dispatch("deploy:log", {
+      deploymentId,
+      level: "error",
+      message: `❌ SYSTEM ERROR: ${err.message}`,
+      stage: "system",
+    });
+
     eventBus.dispatch("deploy:failed", {
       deploymentId,
       error: err.message,
       stage: "system",
     });
+
+    // Save error to database for persistence
+    await Deployment.findByIdAndUpdate(deploymentId, { error: err.message });
 
     throw err;
   }
