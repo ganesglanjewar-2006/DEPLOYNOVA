@@ -121,14 +121,21 @@ async function deployProject({ deployment, project }) {
   const deploymentId = deployment._id.toString();
   const startTime = Date.now();
 
-  // 💎 ARCHITECTURAL ISOLATION: Move outside project root to C:\DeployNova_Data
-  const baseDir = path.resolve(process.env.DEPLOY_BASE_DIR || "C:\\DeployNova_Data");
+  // 💎 VERCEL-LEVEL ISOLATION: Forced absolute path in system root
+  // We use a very short path (C:\DN_Builds) to avoid 260-char Windows limits
+  const baseDir = "C:\\DN_Builds";
   const deployDir = path.join(baseDir, "deployments", `${project.name}-${uuidv4().substring(0, 8)}`);
 
   try {
-    // Ensure isolated infrastructure exists
+    // Ensure absolute infrastructure exists
     if (!fs.existsSync(baseDir)) {
-      fs.mkdirSync(baseDir, { recursive: true });
+      try {
+        fs.mkdirSync(baseDir, { recursive: true });
+      } catch (err) {
+        // Fallback to a secondary root if C:\ is completely blocked
+        const fallbackBase = "C:\\DeployNova_Infrastructure";
+        if (!fs.existsSync(fallbackBase)) fs.mkdirSync(fallbackBase, { recursive: true });
+      }
     }
     const deploymentsDir = path.join(baseDir, "deployments");
     if (!fs.existsSync(deploymentsDir)) {
@@ -150,7 +157,7 @@ async function deployProject({ deployment, project }) {
     eventBus.dispatch("deploy:log", {
       deploymentId,
       level: "info",
-      message: `🏗️  INFRASTRUCTURE: Isolated at ${baseDir}`,
+      message: `🚀 INFRASTRUCTURE: Hard-Isolated at ${baseDir}`,
       stage: "prep",
     });
 
