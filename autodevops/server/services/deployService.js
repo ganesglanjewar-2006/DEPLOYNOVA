@@ -183,6 +183,24 @@ async function deployProject({ deployment, project }) {
       stage: "clone",
     });
 
+    // ── STAGE 1.5: Intelligent Monorepo Discovery ──
+    let buildRoot = deployDir;
+    const commonPaths = ["autodevops/server", "server", "backend", "api"];
+    
+    for (const subPath of commonPaths) {
+      const fullSubPath = path.join(deployDir, subPath);
+      if (fs.existsSync(path.join(fullSubPath, "package.json"))) {
+        buildRoot = fullSubPath;
+        eventBus.dispatch("deploy:log", {
+          deploymentId,
+          level: "info",
+          message: `🔍 Discovery: Detected Backend in ${subPath}`,
+          stage: "discovery",
+        });
+        break;
+      }
+    }
+
     // Try to read commit hash
     try {
       const commitOutput = await runCommand("git rev-parse HEAD", deployDir, deploymentId, "clone");
@@ -199,7 +217,7 @@ async function deployProject({ deployment, project }) {
       message: "Processing dependencies...",
     });
 
-    const pkgPath = path.join(deployDir, "package.json");
+    const pkgPath = path.join(buildRoot, "package.json");
     if (fs.existsSync(pkgPath)) {
       const cacheDir = path.resolve(baseDir, "cache", project._id.toString());
       const cacheModules = path.join(cacheDir, "node_modules");
@@ -210,10 +228,10 @@ async function deployProject({ deployment, project }) {
         fs.mkdirSync(cacheModules, { recursive: true });
       }
 
-      const targetModules = path.join(deployDir, "node_modules");
+      const targetModules = path.join(buildRoot, "node_modules");
 
       // Calculate new fingerprint
-      const newFingerprint = getFingerprint(deployDir);
+      const newFingerprint = getFingerprint(buildRoot);
       let oldFingerprint = "";
 
       if (fs.existsSync(fingerprintFile)) {
@@ -275,7 +293,7 @@ async function deployProject({ deployment, project }) {
           // 2. Perform Install
           await runCommand(
             "npm install --production --prefer-offline --no-audit --no-fund",
-            deployDir,
+            buildRoot,
             deploymentId,
             "install"
           );
@@ -304,7 +322,7 @@ async function deployProject({ deployment, project }) {
           // Force fresh install in real directory (without junction)
           await runCommand(
             "npm install --production --prefer-offline --no-audit --no-fund",
-            deployDir,
+            buildRoot,
             deploymentId,
             "install"
           );
@@ -341,7 +359,7 @@ async function deployProject({ deployment, project }) {
       });
 
       const buildCmd = project.customBuildCmd || "npm run build";
-      await runCommand(buildCmd, deployDir, deploymentId, "build");
+      await runCommand(buildCmd, buildRoot, deploymentId, "build");
 
       eventBus.dispatch("deploy:log", {
         deploymentId,
@@ -359,7 +377,18 @@ async function deployProject({ deployment, project }) {
     });
 
     const port = getNextPort();
-    const startCmd = project.customStartCmd || "node server.js";
+    
+    // Dynamic starting detection
+    let startCmd = project.customStartCmd;
+    if (!startCmd) {
+      if (fs.existsSync(path.join(buildRoot, "server.js"))) {
+        startCmd = "node server.js";
+      } else if (fs.existsSync(path.join(buildRoot, "index.js"))) {
+        startCmd = "node index.js";
+      } else {
+        startCmd = "npm start";
+      }
+    }
 
     // Build environment vars
     const env = {
@@ -378,7 +407,7 @@ async function deployProject({ deployment, project }) {
     // Spawn the application process
     const parts = startCmd.split(" ");
     const appProcess = spawn(parts[0], parts.slice(1), {
-      cwd: deployDir,
+      cwd: buildRoot,
       env,
       stdio: ["ignore", "pipe", "pipe"],
       shell: true,
