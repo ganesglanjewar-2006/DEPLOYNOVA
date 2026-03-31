@@ -37,7 +37,7 @@ export default function AutomationPage() {
       ]);
       setRules(rulesRes.rules || []);
       setLogs(logsRes.logs || []);
-      setProjects(projectsRes.projects || []);
+      setProjects(projectsRes.data?.projects || []);
     } catch (err) {
       console.error('Failed to load automation data:', err);
     } finally {
