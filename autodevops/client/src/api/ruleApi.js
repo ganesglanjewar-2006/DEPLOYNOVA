@@ -1,7 +1,7 @@
 import axiosInstance from './axios';
 
 // Note: Use a separate base URL for LifeOS if running on different port
-const LIFEOS_BASE_URL = 'http://localhost:5001/api';
+const LIFEOS_BASE_URL = import.meta.env.VITE_LIFEOS_URL || 'http://localhost:5001/api';
 
 const ruleApi = {
   // 📋 Fetch all rules
