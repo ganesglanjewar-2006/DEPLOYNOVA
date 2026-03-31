@@ -3,7 +3,7 @@ import { useParams, Link, useNavigate } from "react-router-dom";
 import { getProject, deleteProject } from "../api/projectApi";
 import { getDeployments, triggerDeploy } from "../api/deployApi";
 import StatusBadge from "../components/StatusBadge";
-import { HiOutlineArrowLeft, HiOutlineRocketLaunch, HiOutlineTrash, HiOutlineClock } from "react-icons/hi2";
+import { HiOutlineArrowLeft, HiOutlineRocketLaunch, HiOutlineTrash, HiOutlineClock, HiOutlineLink } from "react-icons/hi2";
 
 export default function ProjectDetailPage() {
   const { projectId } = useParams();
@@ -111,19 +111,27 @@ export default function ProjectDetailPage() {
             <div className="empty-state"><p>No deployments yet. Hit "Deploy Now" to start!</p></div>
           ) : (
             <div className="deploy-history-list">
-              {deployments.map((dep) => (
-                <Link key={dep._id} to={`/deploy/${dep._id}`} className="deploy-history-item">
-                  <div className="deploy-history-left">
-                    <StatusBadge status={dep.status} />
-                    <span className="deploy-history-trigger">{dep.triggeredBy}</span>
-                  </div>
-                  <div className="deploy-history-right">
-                    {dep.buildDuration && (
-                      <span className="deploy-history-duration"><HiOutlineClock /> {formatDuration(dep.buildDuration)}</span>
-                    )}
-                    <span className="deploy-history-time">{new Date(dep.createdAt).toLocaleString()}</span>
-                  </div>
-                </Link>
+                <div key={dep._id} className="deploy-history-item-container">
+                  <Link to={`/deploy/${dep._id}`} className="deploy-history-item">
+                    <div className="deploy-history-left">
+                      <StatusBadge status={dep.status} />
+                      <span className="deploy-history-trigger">{dep.triggeredBy}</span>
+                    </div>
+                    <div className="deploy-history-right">
+                      {dep.buildDuration && (
+                        <span className="deploy-history-duration"><HiOutlineClock /> {formatDuration(dep.buildDuration)}</span>
+                      )}
+                      <span className="deploy-history-time">{new Date(dep.createdAt).toLocaleString()}</span>
+                    </div>
+                  </Link>
+                  {dep.url && dep.status === "live" && (
+                    <div className="deploy-history-url-hover">
+                      <a href={dep.url} target="_blank" rel="noopener noreferrer" className="btn btn-sm btn-ghost">
+                        <HiOutlineLink /> Open App
+                      </a>
+                    </div>
+                  )}
+                </div>
               ))}
             </div>
           )}

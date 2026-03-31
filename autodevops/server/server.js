@@ -18,6 +18,7 @@ const http = require("http");
 const mongoose = require("mongoose");
 const cors = require("cors");
 const { Server } = require("socket.io");
+const { createProxyMiddleware } = require("http-proxy-middleware");
 
 // ── Event System ──
 const eventBus = require("./events/eventBus");
@@ -63,6 +64,30 @@ if (process.env.NODE_ENV === "development") {
     next();
   });
 }
+
+/**
+ * 🛰️ PROJECT DEPLOYMENT PROXY
+ * Allows accessing internal ports (5000-6000) through the main Render port via /proxy/:port
+ */
+app.use("/proxy/:port", (req, res, next) => {
+  const { port } = req.params;
+  return createProxyMiddleware({
+    target: `http://localhost:${port}`,
+    changeOrigin: true,
+    pathRewrite: {
+      [`^/proxy/${port}`]: "",
+    },
+    ws: true,
+    logLevel: "error",
+    onError: (err, req, res) => {
+      res.status(502).json({
+        success: false,
+        error: "Deployment Proxy Error: The project might still be starting or crashed.",
+        details: err.message
+      });
+    }
+  })(req, res, next);
+});
 
 // ═══════════════════════════════════════════════════
 // API Routes

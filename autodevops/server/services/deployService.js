@@ -662,7 +662,8 @@ server.listen(port, () => console.log('🚀 Static server running on port', port
 
     // ── COMPLETE ──
     const buildDuration = Date.now() - startTime;
-    const url = `http://localhost:${port}`;
+    const baseUrl = process.env.AUTO_DEV_OPS_URL || "http://localhost:5000";
+    const url = `${baseUrl}/proxy/${port}/`;
 
     // Update deployment with process info
     await Deployment.findByIdAndUpdate(deploymentId, {
