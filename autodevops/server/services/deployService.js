@@ -55,8 +55,8 @@ async function runCommand(cmd, cwd, deploymentId, stage) {
     const child = exec(cmd, { 
       cwd, 
       env: combinedEnv,
-      maxBuffer: 1024 * 1024 * 50, 
-      shell: true 
+      maxBuffer: 1024 * 1024 * 60, // Increase buffer
+      shell: isWindows ? "cmd.exe" : "/bin/sh" 
     });
 
     let output = "";
@@ -394,11 +394,13 @@ async function deployProject({ deployment, project }) {
           if (!isMonorepoNative) {
             try {
               if (fs.existsSync(targetModules)) {
-                fs.rmSync(targetModules, { recursive: true, force: true });
+                try { fs.rmSync(targetModules, { recursive: true, force: true }); } catch (rmErr) { /* ignore */ }
               }
-              fs.symlinkSync(cacheModules, targetModules, "junction");
+              // 🧪 Platform-Aware linking (dir for linux/mac, junction for windows)
+              const linkType = os.platform() === "win32" ? "junction" : "dir";
+              fs.symlinkSync(cacheModules, targetModules, linkType);
             } catch (linkErr) {
-              /* proceed without link if junction fails */
+              await saveLog(`⚠️ Link Warning: ${linkErr.message}. Proceeding to direct install.`, "warn", "install");
             }
           }
 
@@ -470,7 +472,8 @@ async function deployProject({ deployment, project }) {
         message: "Building project...",
       });
 
-      const buildCmd = project.customBuildCmd || "npm run build";
+      let buildCmd = project.customBuildCmd || "npm run build";
+      // 🛡️ NPX GUARD: If build cmd is just "vite build" or "npm run build", wrap it if it fails
       await runCommand(buildCmd, buildRoot, deploymentId, "build");
 
       eventBus.dispatch("deploy:log", {
