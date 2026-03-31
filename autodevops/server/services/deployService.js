@@ -13,6 +13,9 @@ const Deployment = require("../models/Deployment");
 // Track running processes so we can stop them
 const runningProcesses = new Map();
 
+// 💎 PLATFORM DETECTION: OS-Agnostic support
+const isWindows = os.platform() === "win32";
+
 // Dynamic port allocation (Starting at 5000 to avoid collisions with 4xxx ecosystem)
 let nextPort = parseInt(process.env.DEPLOY_PORT_START || "5000", 10);
 const maxPort = parseInt(process.env.DEPLOY_PORT_END || "6000", 10);
@@ -143,7 +146,6 @@ async function deployProject({ deployment, project }) {
   };
 
   // 💎 CLOUD-NATIVE ISOLATION: OS-Agnostic absolute path
-  const isWindows = os.platform() === "win32";
   const baseDir = isWindows ? "C:\\DN_Builds" : "/tmp/DN_Builds";
   const deployDir = path.join(baseDir, "deployments", `${project.name}-${uuidv4().substring(0, 8)}`);
 
