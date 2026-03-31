@@ -111,6 +111,7 @@ export default function ProjectDetailPage() {
             <div className="empty-state"><p>No deployments yet. Hit "Deploy Now" to start!</p></div>
           ) : (
             <div className="deploy-history-list">
+              {deployments.map((dep) => (
                 <div key={dep._id} className="deploy-history-item-container">
                   <Link to={`/deploy/${dep._id}`} className="deploy-history-item">
                     <div className="deploy-history-left">
