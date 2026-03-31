@@ -29,7 +29,8 @@ DeployNova is a production-grade, self-hosted deployment ecosystem that brings "
 ---
 
 ## 🧩 3. Key Concepts
-For a deep dive into how the **Engine**, **Brain**, and **Dashboard** are interconnected, please refer to our strategic guide:
+For a deep dive into the **Architecture**, **API Flow**, and **Master Blueprint** of the ecosystem, please refer to our strategic guides:
+- **[THE_DEPLOYNOVA_BLUEPRINT.md](file:///c:/RESUME_PROJECT_2/THE_DEPLOYNOVA_BLUEPRINT.md) (Master Reference)**
 - **[important_concepts.md](file:///c:/RESUME_PROJECT_2/important_concepts.md)**
 
 ---
