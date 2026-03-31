@@ -79,7 +79,9 @@ code { font-family: 'JetBrains Mono', monospace; }
   position: fixed;
   left: 0; top: 0; bottom: 0;
   width: var(--sidebar-width);
-  background: var(--bg-surface);
+  background: rgba(17, 19, 24, 0.75);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
@@ -1127,7 +1129,11 @@ code { font-family: 'JetBrains Mono', monospace; }
 .rule-last-run { font-size: 0.75rem; color: var(--text-muted); }
 
 /* Execution Logs Table */
-.log-card { padding: 0; overflow: hidden; }
+.log-card { 
+  padding: 0; 
+  overflow-x: auto; 
+  -webkit-overflow-scrolling: touch;
+}
 .log-table { width: 100%; border-collapse: collapse; text-align: left; }
 .log-table th {
   padding: 16px 24px;
@@ -1190,6 +1196,7 @@ code { font-family: 'JetBrains Mono', monospace; }
   .auth-card { padding: 24px; }
   .mobile-header { height: 60px; }
   .main-content { padding-top: 76px !important; }
+  .rule-cards-grid { grid-template-columns: 1fr; }
 }
 
 .mobile-menu-toggle {

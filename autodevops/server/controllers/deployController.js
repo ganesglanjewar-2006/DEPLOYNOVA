@@ -9,10 +9,12 @@ const eventBus = require("../events/eventBus");
 // ── POST /api/deploy/:projectId ──
 exports.triggerDeploy = async (req, res, next) => {
   try {
-    const project = await Project.findOne({
-      _id: req.params.projectId,
-      userId: req.user._id,
-    });
+    const query = { _id: req.params.projectId };
+    if (!req.user.isSystem) {
+      query.userId = req.user._id;
+    }
+
+    const project = await Project.findOne(query);
 
     if (!project) {
       return res.status(404).json({ success: false, error: "Project not found" });
@@ -80,10 +82,12 @@ exports.triggerDeploy = async (req, res, next) => {
 // ── GET /api/deploy/:projectId ──
 exports.getDeployments = async (req, res, next) => {
   try {
-    const project = await Project.findOne({
-      _id: req.params.projectId,
-      userId: req.user._id,
-    });
+    const query = { _id: req.params.projectId };
+    if (!req.user.isSystem) {
+      query.userId = req.user._id;
+    }
+
+    const project = await Project.findOne(query);
 
     if (!project) {
       return res.status(404).json({ success: false, error: "Project not found" });

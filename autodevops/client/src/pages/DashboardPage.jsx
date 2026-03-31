@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { getProjects } from "../api/projectApi";
 import { getRunningDeployments } from "../api/deployApi";
+import ruleApi from "../api/ruleApi";
 import { useAuth } from "../context/AuthContext";
 import { useSocket } from "../hooks/useSocket";
 import StatusBadge from "../components/StatusBadge";
@@ -12,6 +13,7 @@ export default function DashboardPage() {
   const { isConnected, deployEvents } = useSocket();
   const [projects, setProjects] = useState([]);
   const [running, setRunning] = useState([]);
+  const [dbLogs, setDbLogs] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -27,9 +29,16 @@ export default function DashboardPage() {
 
   async function loadData() {
     try {
-      const [projRes, runRes] = await Promise.all([getProjects(), getRunningDeployments()]);
-      setProjects(projRes.data.projects);
-      setRunning(runRes.data.deployments);
+      const [projRes, runRes, logsRes] = await Promise.all([
+        getProjects(),
+        getRunningDeployments(),
+        ruleApi.getLogs().catch(() => ({ logs: [] })) // fallback if it fails
+      ]);
+      setProjects(projRes.data?.projects || []);
+      setRunning(runRes.data?.deployments || []);
+      if (logsRes && logsRes.logs) {
+        setDbLogs(logsRes.logs);
+      }
     } catch (err) {
       console.error("Dashboard load error:", err);
     } finally {
@@ -39,7 +48,22 @@ export default function DashboardPage() {
 
   const totalProjects = projects.length;
   const liveDeployments = projects.filter((p) => p.lastDeployment?.status === "live").length;
-  const recentActivity = deployEvents.slice(-5).reverse();
+  
+  // Combine historical logs and live socket events
+  const formattedDbLogs = dbLogs.map(log => ({
+    event: log.status === "success" ? "rule:success" : "rule:failed",
+    data: { message: `[${log.ruleId?.name || "System"}] ${log.message}` },
+    timestamp: new Date(log.timestamp).getTime()
+  }));
+  
+  const socketEvents = deployEvents.map(ev => ({
+    ...ev,
+    timestamp: new Date(ev.timestamp).getTime()
+  }));
+
+  const recentActivity = [...formattedDbLogs, ...socketEvents]
+    .sort((a, b) => b.timestamp - a.timestamp)
+    .slice(0, 10);
 
   if (loading) {
     return <div className="page-loader"><div className="loader-spinner" /><p>Loading dashboard...</p></div>;
@@ -133,7 +157,7 @@ export default function DashboardPage() {
               <div className="activity-feed">
                 {recentActivity.map((ev, i) => (
                   <div key={i} className="activity-item">
-                    <span className="activity-event">{ev.event.replace("deploy:", "")}</span>
+                    <span className="activity-event">{ev.event.replace("deploy:", "").replace("rule:", "rule ")}</span>
                     <span className="activity-msg">{ev.data.message || ev.data.stage || ev.data.url || "—"}</span>
                     <span className="activity-time">{new Date(ev.timestamp).toLocaleTimeString()}</span>
                   </div>
