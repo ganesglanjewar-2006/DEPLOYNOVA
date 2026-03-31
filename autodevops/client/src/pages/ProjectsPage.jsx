@@ -14,11 +14,18 @@ export default function ProjectsPage() {
   const [deploying, setDeploying] = useState(null);
   const navigate = useNavigate();
   const [form, setForm] = useState({
-    name: "", repoUrl: "", framework: "node", branch: "main",
-    customBuildCmd: "", customStartCmd: "",
+    name: "",
+    repoUrl: "",
+    framework: "node",
+    branch: "main",
+    rootDirectory: "",
+    customBuildCmd: "",
+    customStartCmd: "",
   });
 
-  useEffect(() => { loadProjects(); }, []);
+  useEffect(() => {
+    loadProjects();
+  }, []);
 
   async function loadProjects() {
     try {
@@ -36,14 +43,27 @@ export default function ProjectsPage() {
     setFormError("");
     try {
       const payload = { ...form };
+      if (!payload.rootDirectory) delete payload.rootDirectory;
       if (!payload.customBuildCmd) delete payload.customBuildCmd;
       if (!payload.customStartCmd) delete payload.customStartCmd;
       await createProject(payload);
       setShowModal(false);
-      setForm({ name: "", repoUrl: "", framework: "node", branch: "main", customBuildCmd: "", customStartCmd: "" });
+      setForm({
+        name: "",
+        repoUrl: "",
+        framework: "node",
+        branch: "main",
+        rootDirectory: "",
+        customBuildCmd: "",
+        customStartCmd: "",
+      });
       loadProjects();
     } catch (err) {
-      setFormError(err.response?.data?.error || err.response?.data?.details?.join(", ") || "Failed to create project");
+      setFormError(
+        err.response?.data?.error ||
+          err.response?.data?.details?.join(", ") ||
+          "Failed to create project"
+      );
     }
   }
 
@@ -160,6 +180,10 @@ export default function ProjectsPage() {
               <label>Branch</label>
               <input type="text" placeholder="main" value={form.branch} onChange={(e) => setForm({ ...form, branch: e.target.value })} />
             </div>
+          </div>
+          <div className="form-group">
+            <label>Root Directory <span className="form-optional">(optional - for monorepos)</span></label>
+            <input type="text" placeholder="./apps/web" value={form.rootDirectory} onChange={(e) => setForm({ ...form, rootDirectory: e.target.value })} />
           </div>
           <div className="form-group">
             <label>Custom Build Command <span className="form-optional">(optional)</span></label>

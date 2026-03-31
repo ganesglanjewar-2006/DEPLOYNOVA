@@ -1,8 +1,16 @@
 import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { HiOutlineHome, HiOutlineFolder, HiOutlineCog6Tooth, HiOutlineArrowRightOnRectangle, HiOutlineRocketLaunch, HiOutlineBolt } from "react-icons/hi2";
+import { 
+  HiOutlineHome, 
+  HiOutlineFolder, 
+  HiOutlineCog6Tooth, 
+  HiOutlineArrowRightOnRectangle, 
+  HiOutlineRocketLaunch, 
+  HiOutlineBolt,
+  HiOutlineXMark
+} from "react-icons/hi2";
 
-export default function Sidebar() {
+export default function Sidebar({ isOpen, onClose }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
 
@@ -19,15 +27,24 @@ export default function Sidebar() {
   ];
 
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar ${isOpen ? "open" : ""}`}>
       <div className="sidebar-brand">
         <HiOutlineRocketLaunch className="sidebar-brand-icon" />
         <span>DeployNova</span>
+        <button className="sidebar-close-mobile" onClick={onClose}>
+          <HiOutlineXMark />
+        </button>
       </div>
 
       <nav className="sidebar-nav">
         {links.map((link) => (
-          <NavLink key={link.to} to={link.to} end={link.to === "/"} className={({ isActive }) => `sidebar-link ${isActive ? "active" : ""}`}>
+          <NavLink 
+            key={link.to} 
+            to={link.to} 
+            end={link.to === "/"} 
+            className={({ isActive }) => `sidebar-link ${isActive ? "active" : ""}`}
+            onClick={onClose}
+          >
             <span className="sidebar-link-icon">{link.icon}</span>
             <span className="sidebar-link-label">{link.label}</span>
           </NavLink>

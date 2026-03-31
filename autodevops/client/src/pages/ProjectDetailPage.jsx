@@ -88,6 +88,10 @@ export default function ProjectDetailPage() {
           <span className="deploy-info-value">{project.branch}</span>
         </div>
         <div className="deploy-info-card">
+          <span className="deploy-info-label">Root Directory</span>
+          <span className="deploy-info-value">{project.rootDirectory || "(auto)" }</span>
+        </div>
+        <div className="deploy-info-card">
           <span className="deploy-info-label">Status</span>
           <StatusBadge status={project.status} />
         </div>

@@ -48,11 +48,17 @@ exports.register = async (req, res, next) => {
       });
     }
 
+    console.log(`[👤 Auth] Registering new user: ${email}...`);
     const user = await User.create({ name, email, password });
+    console.log(`[👤 Auth] User registration successful: ${email}`);
 
     sendTokenResponse(user, 201, res);
   } catch (err) {
-    next(err);
+    console.error("[👤 Auth] ❌ Registration Failed:", err);
+    res.status(500).json({
+      success: false,
+      error: "Registration failed. Check server logs for details.",
+    });
   }
 };
 

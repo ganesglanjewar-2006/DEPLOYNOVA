@@ -13,62 +13,69 @@ const Deployment = require("../models/Deployment");
 // Track running processes so we can stop them
 const runningProcesses = new Map();
 
-// Dynamic port allocation
-let nextPort = parseInt(process.env.DEPLOY_PORT_START || "4000", 10);
-const maxPort = parseInt(process.env.DEPLOY_PORT_END || "4100", 10);
+// Dynamic port allocation (Starting at 5000 to avoid collisions with 4xxx ecosystem)
+let nextPort = parseInt(process.env.DEPLOY_PORT_START || "5000", 10);
+const maxPort = parseInt(process.env.DEPLOY_PORT_END || "6000", 10);
 
 function getNextPort() {
   const port = nextPort;
-  nextPort = nextPort >= maxPort ? parseInt(process.env.DEPLOY_PORT_START || "4000", 10) : nextPort + 1;
+  nextPort = nextPort >= maxPort ? parseInt(process.env.DEPLOY_PORT_START || "5000", 10) : nextPort + 1;
   return port;
 }
 
 /**
  * Execute a shell command and return a Promise.
- * Streams stdout/stderr to the event bus.
+ * Streams stdout/stderr to the event bus and persists to the database.
  */
-function runCommand(cmd, cwd, deploymentId, stage) {
+async function runCommand(cmd, cwd, deploymentId, stage) {
+  const saveLog = async (message, level = "info") => {
+    // ⚡ STREAM (Live)
+    eventBus.dispatch("deploy:log", { deploymentId, level, message, stage });
+    
+    // 💾 PERSIST (Database)
+    try {
+      await Deployment.findByIdAndUpdate(deploymentId, {
+        $push: { logs: { message, level, stage, timestamp: new Date() } }
+      });
+    } catch (err) {
+      /* non-critical database log failure */
+    }
+  };
+
   return new Promise((resolve, reject) => {
-    eventBus.dispatch("deploy:log", {
-      deploymentId,
-      level: "info",
-      message: `$ ${cmd}`,
-      stage,
-    });
+    saveLog(`$ ${cmd}`);
+
+    // 🛠️ SMART PATH INJECTOR (Ensure Windows finds 'vite', 'tsc', etc.)
+    const localBin = path.join(cwd, "node_modules", ".bin");
+    const combinedEnv = { 
+      ...process.env, 
+      PATH: `${localBin}${path.delimiter}${process.env.PATH}` 
+    };
 
     const child = exec(cmd, { 
       cwd, 
+      env: combinedEnv,
       maxBuffer: 1024 * 1024 * 50, 
       shell: true 
     });
 
     let output = "";
 
-    child.stdout.on("data", (data) => {
+    child.stdout.on("data", async (data) => {
       output += data.toString();
       const lines = data.toString().trim().split("\n");
       for (const line of lines) {
         if (line.trim()) {
-          eventBus.dispatch("deploy:log", {
-            deploymentId,
-            level: "info",
-            message: line.trim(),
-            stage,
-          });
+          await saveLog(line.trim(), "info");
         }
       }
     });
 
-    child.stderr.on("data", (data) => {
+    child.stderr.on("data", async (data) => {
       const lines = data.toString().trim().split("\n");
       for (const line of lines) {
         if (line.trim()) {
-          eventBus.dispatch("deploy:log", {
-            deploymentId,
-            level: "warn",
-            message: line.trim(),
-            stage,
-          });
+          await saveLog(line.trim(), "warn");
         }
       }
     });
@@ -121,9 +128,23 @@ async function deployProject({ deployment, project }) {
   const deploymentId = deployment._id.toString();
   const startTime = Date.now();
 
-  // 💎 VERCEL-LEVEL ISOLATION: Forced absolute path in system root
-  // We use a very short path (C:\DN_Builds) to avoid 260-char Windows limits
-  const baseDir = "C:\\DN_Builds";
+  const saveLog = async (message, level = "info", stage = "prep") => {
+    // ⚡ STREAM (Live)
+    eventBus.dispatch("deploy:log", { deploymentId, level, message, stage });
+    
+    // 💾 PERSIST (Database)
+    try {
+      await Deployment.findByIdAndUpdate(deploymentId, {
+        $push: { logs: { message, level, stage, timestamp: new Date() } }
+      });
+    } catch (err) {
+      /* non-critical database log failure */
+    }
+  };
+
+  // 💎 CLOUD-NATIVE ISOLATION: OS-Agnostic absolute path
+  const isWindows = os.platform() === "win32";
+  const baseDir = isWindows ? "C:\\DN_Builds" : "/tmp/DN_Builds";
   const deployDir = path.join(baseDir, "deployments", `${project.name}-${uuidv4().substring(0, 8)}`);
 
   try {
@@ -132,8 +153,8 @@ async function deployProject({ deployment, project }) {
       try {
         fs.mkdirSync(baseDir, { recursive: true });
       } catch (err) {
-        // Fallback to a secondary root if C:\ is completely blocked
-        const fallbackBase = "C:\\DeployNova_Infrastructure";
+        // Fallback to a secondary root if main root is restricted
+        const fallbackBase = isWindows ? "C:\\DeployNova_Infrastructure" : "./deployments";
         if (!fs.existsSync(fallbackBase)) fs.mkdirSync(fallbackBase, { recursive: true });
       }
     }
@@ -147,19 +168,8 @@ async function deployProject({ deployment, project }) {
     const freeMem = Math.round(os.freemem() / 1024 / 1024 / 1024);
     const cpuCount = os.cpus().length;
 
-    eventBus.dispatch("deploy:log", {
-      deploymentId,
-      level: "info",
-      message: `🖥️  SYSTEM HEALTH: ${cpuCount} Cores | ${freeMem}GB/${totalMem}GB RAM Available`,
-      stage: "prep",
-    });
-
-    eventBus.dispatch("deploy:log", {
-      deploymentId,
-      level: "info",
-      message: `🚀 INFRASTRUCTURE: Hard-Isolated at ${baseDir}`,
-      stage: "prep",
-    });
+    await saveLog(`🖥️  SYSTEM HEALTH: ${cpuCount} Cores | ${freeMem}GB/${totalMem}GB RAM Available (${os.platform()})`, "info", "prep");
+    await saveLog(`🚀 INFRASTRUCTURE: Cloud-Ready Isolated at ${baseDir}`, "info", "prep");
 
     // ── STAGE 1: Clone ──
     eventBus.dispatch("deploy:stage", {
@@ -184,20 +194,59 @@ async function deployProject({ deployment, project }) {
     });
 
     // ── STAGE 1.5: Intelligent Monorepo Discovery ──
+    /**
+     * 🕵️‍♂️ RECURSIVE DISCOVERY ENGINE
+     * Crawls subfolders to find the project's brain (package.json)
+     */
+    const findPackageJson = (currentDir, depth = 0) => {
+      if (depth > 2) return null; // Max 3 levels deep (Standard for most monorepos)
+      
+      const pkgPath = path.join(currentDir, "package.json");
+      if (fs.existsSync(pkgPath)) return currentDir;
+
+      try {
+        const items = fs.readdirSync(currentDir, { withFileTypes: true });
+        // Prioritize common paths (client, server, web, apps, backend)
+        const priorityPatterns = ["client", "server", "web", "apps", "backend", "api", "frontend"];
+        const subs = items
+          .filter(item => item.isDirectory() && !item.name.startsWith(".") && item.name !== "node_modules")
+          .sort((a, b) => {
+            const aIndex = priorityPatterns.indexOf(a.name.toLowerCase());
+            const bIndex = priorityPatterns.indexOf(b.name.toLowerCase());
+            if (aIndex !== -1 && bIndex === -1) return -1;
+            if (aIndex === -1 && bIndex !== -1) return 1;
+            return 0;
+          });
+
+        for (const sub of subs) {
+          const res = findPackageJson(path.join(currentDir, sub.name), depth + 1);
+          if (res) return res;
+        }
+      } catch { /* Silent fail for file-system permission gaps */ }
+      return null;
+    };
+
     let buildRoot = deployDir;
-    const commonPaths = ["autodevops/server", "server", "backend", "api"];
     
-    for (const subPath of commonPaths) {
-      const fullSubPath = path.join(deployDir, subPath);
-      if (fs.existsSync(path.join(fullSubPath, "package.json"))) {
-        buildRoot = fullSubPath;
-        eventBus.dispatch("deploy:log", {
-          deploymentId,
-          level: "info",
-          message: `🔍 Discovery: Detected Backend in ${subPath}`,
-          stage: "discovery",
-        });
-        break;
+    // 🎯 PRIORITY 1: Explicit Root Metadata (Lock-in)
+    const explicitRoot = project.rootDirectory || project.envVars?.get("ROOT_DIRECTORY") || project.envVars?.get("ROOT_DIR");
+    
+    if (explicitRoot) {
+      const targetPath = path.join(deployDir, explicitRoot);
+      if (fs.existsSync(path.join(targetPath, "package.json"))) {
+        buildRoot = targetPath;
+        await saveLog(`🎯 Explicit Override: Building from /${explicitRoot}`, "info", "discovery");
+      } else {
+        await saveLog(`⚠️ Warning: Custom root /${explicitRoot} exists but has no package.json. Attempting discovery...`, "warn", "discovery");
+        buildRoot = findPackageJson(deployDir) || deployDir;
+      }
+    } else {
+      // 🕵️ PRIORITY 2: Intelligent Deep Discovery
+      const discoveredPath = findPackageJson(deployDir);
+      if (discoveredPath && discoveredPath !== deployDir) {
+        buildRoot = discoveredPath;
+        const relativePath = path.relative(deployDir, discoveredPath);
+        await saveLog(`🔍 Deep Discovery: Detected Project in /${relativePath}`, "info", "discovery");
       }
     }
 
@@ -216,6 +265,57 @@ async function deployProject({ deployment, project }) {
       stage: "installing",
       message: "Processing dependencies...",
     });
+
+    /**
+     * 🏗️ GLOBAL ECOSYSTEM DETECTION
+     * Check if this sub-project belongs to a larger Monorepo Hub.
+     * If so, we must install the Hub first to link shared dependencies.
+     */
+    let hubRoot = null;
+    let isMonorepoNative = false;
+    let currentCheck = path.dirname(buildRoot);
+    while (currentCheck.startsWith(deployDir) && currentCheck !== deployDir) {
+      if (fs.existsSync(path.join(currentCheck, "package.json"))) {
+        hubRoot = currentCheck;
+        break;
+      }
+      currentCheck = path.dirname(currentCheck);
+    }
+    // Final fallback: Check the deployDir itself if buildRoot is nested
+    if (!hubRoot && buildRoot !== deployDir && fs.existsSync(path.join(deployDir, "package.json"))) {
+      hubRoot = deployDir;
+    }
+
+    if (hubRoot) {
+      const hubName = path.relative(deployDir, hubRoot) || "root";
+      const hubPkgPath = path.join(hubRoot, "package.json");
+      let installCmd = "npm install --prefer-offline --no-audit --no-fund";
+      
+      // 🕵️ SMART SCRIPT DETECTOR: Look for "install-all", "setup", or "init"
+      try {
+        if (fs.existsSync(hubPkgPath)) {
+          const hubPkg = JSON.parse(fs.readFileSync(hubPkgPath, "utf8"));
+          const scripts = hubPkg.scripts || {};
+          if (scripts["install-all"]) {
+            installCmd = "npm run install-all";
+            isMonorepoNative = true;
+          } else if (scripts["setup"]) {
+            installCmd = "npm run setup";
+            isMonorepoNative = true;
+          } else if (scripts["init"]) {
+            installCmd = "npm run init";
+            isMonorepoNative = true;
+          }
+        }
+      } catch (err) { /* silent parse fail */ }
+
+      await saveLog(`🏗️ Ecosystem Detected: Linking Global Infrastructure at /${hubName} via '${installCmd}'...`, "info", "install");
+      if (isMonorepoNative) await saveLog("🛡️ Monorepo Native Mode: Disabling Symlink optimizations for Zero-Conflict build.", "info", "install");
+      
+      await runCommand(installCmd, hubRoot, deploymentId, "install");
+      
+      await saveLog("✅ Global Infrastructure linked", "success", "install");
+    }
 
     const pkgPath = path.join(buildRoot, "package.json");
     if (fs.existsSync(pkgPath)) {
@@ -239,11 +339,21 @@ async function deployProject({ deployment, project }) {
       }
 
       // ⚡ CHECK FOR BYPASS ⚡
-      if (newFingerprint && newFingerprint === oldFingerprint) {
+      let isCacheValid = false;
+      if (!isMonorepoNative && newFingerprint && newFingerprint === oldFingerprint) {
+        // 🧪 Sanity Check: Ensure cache isn't hollow/corrupted
+        const sanityCheckFile = path.join(cacheModules, "dotenv");
+        const expressCheckFile = path.join(cacheModules, "express");
+        if (fs.existsSync(sanityCheckFile) || fs.existsSync(expressCheckFile)) {
+          isCacheValid = true;
+        }
+      }
+
+      if (isCacheValid) {
         eventBus.dispatch("deploy:log", {
           deploymentId,
           level: "success",
-          message: "⚡ Zero-Install: Dependencies unchanged. Bypassing install stage.",
+          message: "⚡ Zero-Install: Dependencies verified and active. Bypassing install stage.",
           stage: "install",
         });
 
@@ -268,31 +378,33 @@ async function deployProject({ deployment, project }) {
           }
         }
       } else {
-        // Dependencies changed or first install
+        // Dependencies changed, cache is first-time, or cache was hollow
         eventBus.dispatch("deploy:log", {
           deploymentId,
           level: "info",
           message: oldFingerprint
-            ? "🔄 Dependencies updated. Re-installing..."
+            ? "🔄 Dependencies updated or cache incomplete. Re-installing for perfection..."
             : "📦 Fresh install starting...",
           stage: "install",
         });
 
         // 🛡️ RECOVERY-ENABLED INSTALL
         try {
-          // 1. Try Junction Route (Optimal)
-          try {
-            if (fs.existsSync(targetModules)) {
-              fs.rmSync(targetModules, { recursive: true, force: true });
+          // 1. Try Junction Route (Skip if Monorepo Native to avoid linked conflicts)
+          if (!isMonorepoNative) {
+            try {
+              if (fs.existsSync(targetModules)) {
+                fs.rmSync(targetModules, { recursive: true, force: true });
+              }
+              fs.symlinkSync(cacheModules, targetModules, "junction");
+            } catch (linkErr) {
+              /* proceed without link if junction fails */
             }
-            fs.symlinkSync(cacheModules, targetModules, "junction");
-          } catch (linkErr) {
-            /* proceed without link if junction fails */
           }
 
-          // 2. Perform Install
+          // 2. Perform Install (Full Spectrum for Build)
           await runCommand(
-            "npm install --production --prefer-offline --no-audit --no-fund",
+            "npm install --prefer-offline --no-audit --no-fund",
             buildRoot,
             deploymentId,
             "install"
@@ -321,7 +433,7 @@ async function deployProject({ deployment, project }) {
 
           // Force fresh install in real directory (without junction)
           await runCommand(
-            "npm install --production --prefer-offline --no-audit --no-fund",
+            "npm install --prefer-offline --no-audit --no-fund",
             buildRoot,
             deploymentId,
             "install"
@@ -378,15 +490,34 @@ async function deployProject({ deployment, project }) {
 
     const port = getNextPort();
     
-    // Dynamic starting detection
+    // Intelligent starting detection (Node vs Static)
     let startCmd = project.customStartCmd;
+    let isStatic = false;
+    let staticPath = "";
+
     if (!startCmd) {
       if (fs.existsSync(path.join(buildRoot, "server.js"))) {
         startCmd = "node server.js";
       } else if (fs.existsSync(path.join(buildRoot, "index.js"))) {
         startCmd = "node index.js";
       } else {
-        startCmd = "npm start";
+        // 🧪 STATIC FRONTEND DETECTION
+        const distPaths = ["dist", "build", "out", "public"];
+        for (const dp of distPaths) {
+          if (fs.existsSync(path.join(buildRoot, dp))) {
+            isStatic = true;
+            staticPath = path.join(buildRoot, dp);
+            eventBus.dispatch("deploy:log", {
+              deploymentId,
+              level: "info",
+              message: `🚀 Static Hosting: Detected build folder at /${dp}`,
+              stage: "start",
+            });
+            break;
+          }
+        }
+
+        if (!isStatic) startCmd = "npm start";
       }
     }
 
@@ -404,14 +535,86 @@ async function deployProject({ deployment, project }) {
       }
     }
 
-    // Spawn the application process
-    const parts = startCmd.split(" ");
-    const appProcess = spawn(parts[0], parts.slice(1), {
-      cwd: buildRoot,
-      env,
-      stdio: ["ignore", "pipe", "pipe"],
-      shell: true,
-    });
+    let appProcess;
+
+    if (isStatic) {
+      // 🌐 SPA STATIC SERVER (Pure Node - Zero Dependencies - ESM Bypass)
+      const serverPath = path.join(buildRoot, ".dn_static_server.cjs");
+      const dirPath = path.resolve(staticPath);
+      
+      const serverCode = `
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
+
+const port = ${port};
+const dir = path.resolve(__dirname, '${path.relative(buildRoot, dirPath).replace(/\\/g, "/")}');
+
+/**
+ * Super-fast Pure Node SPA Server
+ * Handles 15+ MIME types and SPA fallback routing
+ */
+const MIME_TYPES = {
+  '.html': 'text/html',
+  '.js': 'text/javascript',
+  '.css': 'text/css',
+  '.json': 'application/json',
+  '.png': 'image/png',
+  '.jpg': 'image/jpg',
+  '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
+  '.wav': 'audio/wav',
+  '.mp4': 'video/mp4',
+  '.woff': 'application/font-woff',
+  '.ttf': 'application/font-ttf',
+  '.eot': 'application/vnd.ms-fontobject',
+  '.otf': 'application/font-otf',
+  '.wasm': 'application/wasm'
+};
+
+const server = http.createServer((req, res) => {
+  let filePath = path.join(dir, req.url === '/' ? 'index.html' : req.url);
+  
+  // 🛡️ SPA ROUTING: Redirect unknown paths to index.html
+  if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+    filePath = path.join(dir, 'index.html');
+  }
+
+  const extname = String(path.extname(filePath)).toLowerCase();
+  const contentType = MIME_TYPES[extname] || 'application/octet-stream';
+
+  fs.readFile(filePath, (error, content) => {
+    if (error) {
+      res.writeHead(500);
+      res.end('Error: ' + error.code);
+    } else {
+      res.writeHead(200, { 'Content-Type': contentType });
+      res.end(content, 'utf-8');
+    }
+  });
+});
+
+server.listen(port, () => console.log('🚀 Static server running on port', port));
+      `.trim();
+
+      fs.writeFileSync(serverPath, serverCode);
+      
+      appProcess = spawn("node", [".dn_static_server.cjs"], {
+        cwd: buildRoot,
+        env,
+        stdio: ["ignore", "pipe", "pipe"],
+        shell: true,
+      });
+    } else {
+      // 🚀 STANDARD NODE START
+      const parts = startCmd.split(" ");
+      appProcess = spawn(parts[0], parts.slice(1), {
+        cwd: buildRoot,
+        env,
+        stdio: ["ignore", "pipe", "pipe"],
+        shell: true,
+      });
+    }
 
     // Store the process reference
     runningProcesses.set(deploymentId, {

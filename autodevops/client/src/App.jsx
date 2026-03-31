@@ -1,7 +1,9 @@
-import { BrowserRouter, Routes, Route, Outlet } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { BrowserRouter, Routes, Route, Outlet, useLocation } from "react-router-dom";
 import { AuthProvider } from "./context/AuthContext";
 import ProtectedRoute from "./components/ProtectedRoute";
 import Sidebar from "./components/Sidebar";
+import { HiBars3, HiOutlineRocketLaunch } from "react-icons/hi2";
 import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
 import DashboardPage from "./pages/DashboardPage";
@@ -12,10 +14,44 @@ import AutomationPage from "./pages/AutomationPage";
 import SettingsPage from "./pages/SettingsPage";
 
 function AppLayout() {
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const location = useLocation();
+
+  // Close menu on route change
+  useEffect(() => {
+    setIsMobileMenuOpen(false);
+  }, [location]);
+
   return (
     <ProtectedRoute>
       <div className="app-layout">
-        <Sidebar />
+        {/* Mobile Navbar */}
+        <header className="mobile-header">
+          <div className="mobile-header-brand">
+            <HiOutlineRocketLaunch className="sidebar-brand-icon" />
+            <span>DeployNova</span>
+          </div>
+          <button 
+            className="mobile-menu-toggle" 
+            onClick={() => setIsMobileMenuOpen(true)}
+          >
+            <HiBars3 />
+          </button>
+        </header>
+
+        {/* Sidebar Overlay */}
+        {isMobileMenuOpen && (
+          <div 
+            className="sidebar-overlay" 
+            onClick={() => setIsMobileMenuOpen(false)}
+          />
+        )}
+
+        <Sidebar 
+          isOpen={isMobileMenuOpen} 
+          onClose={() => setIsMobileMenuOpen(false)} 
+        />
+        
         <main className="main-content">
           <Outlet />
         </main>

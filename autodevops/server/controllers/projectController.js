@@ -8,7 +8,7 @@ const eventBus = require("../events/eventBus");
 // ── POST /api/projects ──
 exports.createProject = async (req, res, next) => {
   try {
-    const { name, repoUrl, framework, branch, customBuildCmd, customStartCmd, envVars } = req.body;
+    const { name, repoUrl, framework, branch, rootDirectory, customBuildCmd, customStartCmd, envVars } = req.body;
 
     const project = await Project.create({
       userId: req.user._id,
@@ -16,6 +16,7 @@ exports.createProject = async (req, res, next) => {
       repoUrl,
       framework,
       branch,
+      rootDirectory,
       customBuildCmd,
       customStartCmd,
       envVars,
@@ -108,11 +109,11 @@ exports.getProject = async (req, res, next) => {
 // ── PUT /api/projects/:id ──
 exports.updateProject = async (req, res, next) => {
   try {
-    const { name, repoUrl, framework, branch, customBuildCmd, customStartCmd, envVars } = req.body;
+    const { name, repoUrl, framework, branch, rootDirectory, customBuildCmd, customStartCmd, envVars } = req.body;
 
     const project = await Project.findOneAndUpdate(
       { _id: req.params.id, userId: req.user._id },
-      { name, repoUrl, framework, branch, customBuildCmd, customStartCmd, envVars },
+      { name, repoUrl, framework, branch, rootDirectory, customBuildCmd, customStartCmd, envVars },
       { new: true, runValidators: true }
     );
 

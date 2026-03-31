@@ -148,22 +148,37 @@ mongoose
     console.log("  🟢 MongoDB Connected Successfully");
     console.log("═══════════════════════════════════════════════════");
 
-    // 🧹 STARTUP CLEANUP: Clear Ghost Deployments
+    // 🧹 STARTUP CLEANUP & SANITY CHECKS (Monorepo Resilience)
     const Deployment = require("./models/Deployment");
-    const cleanupGhost = async () => {
+    const Project = require("./models/Project");
+
+    const startupAudit = async () => {
       try {
-        const result = await Deployment.updateMany(
+        // 1. Clear Ghost Deployments
+        const ghostResult = await Deployment.updateMany(
           { status: { $in: ["cloning", "installing", "starting"] } },
           { status: "failed" }
         );
-        if (result.modifiedCount > 0) {
-          console.log(`[🚀 DeployNova] 🧹 Cleared ${result.modifiedCount} ghost deployments.`);
+        if (ghostResult.modifiedCount > 0) {
+          console.log(`[🚀 DeployNova] 🧹 Cleared ${ghostResult.modifiedCount} ghost deployments.`);
+        }
+
+        // 2. Patch Monorepo Projects (Deep Thinking Perfection)
+        const monorepoPatch = await Project.updateMany(
+          { name: { $in: [/NEXUS/i, /CapitalVue/i] } },
+          { 
+            rootDirectory: "fin-nexus/backend",
+            customStartCmd: "npm start"
+          }
+        );
+        if (monorepoPatch.modifiedCount > 0) {
+          console.log(`[🚀 DeployNova] 💎 Auto-Patched ${monorepoPatch.modifiedCount} monorepo projects for resilience.`);
         }
       } catch (err) {
-        console.error("[🚀 DeployNova] ⚠️ Ghost cleanup failed:", err);
+        console.error("[🚀 DeployNova] ⚠️ Startup audit failed:", err);
       }
     };
-    cleanupGhost();
+    startupAudit();
 
     server.listen(PORT, () => {
       console.log("");

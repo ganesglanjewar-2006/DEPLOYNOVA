@@ -47,6 +47,11 @@ const projectSchema = new mongoose.Schema(
       default: null,
       trim: true,
     },
+    rootDirectory: {
+      type: String,
+      default: null,
+      trim: true,
+    },
     envVars: {
       type: Map,
       of: String,
